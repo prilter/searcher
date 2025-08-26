@@ -1,16 +1,32 @@
 #include <curl/curl.h>
+
 #include <string>
 #include <vector>
-
 #include <iostream>
+
 #include <libxml/HTMLparser.h>
 #include <libxml/tree.h>
 #include <libxml/xpath.h>
-#define html_read_mem htmlReadMemory 
 
-#define NULL_       nullptr
-typedef std::string str;
-typedef htmlDocPtr  html_doc;
+#define html_read_mem              htmlReadMemory 
+#define xml_doc_get_root_element   xmlDocGetRootElement
+#define xml_xpath_new_context      xmlXPathNewContext
+#define xml_xpath_eval_expression  xmlXPathEvalExpression
+#define xml_node_get_content       xmlNodeGetContent
+
+#define xml_free_doc               xmlFreeDoc
+#define xml_xpath_free_object      xmlXPathFreeObject
+#define xml_xpath_free_context     xmlXPathFreeContext
+
+#define NULL_                      nullptr
+#define node_tab                   nodeTab
+#define node_nr                    nodeNr
+
+typedef xmlXPathContextPtr         xml_xpath_context_ptr;
+typedef xmlXPathObjectPtr          xml_xpath_object_ptr;
+typedef std::string                str;
+typedef htmlDocPtr                 html_doc;
+typedef xmlNode                    xml_node;
 
 class scanner {
   private:
@@ -18,12 +34,11 @@ class scanner {
       ((std::string*)userp)->append((char*)contents, size * nmemb);
       return size * nmemb;
     }
-    static int get_text(xmlNode *node, str &buf) { /* print all text info from html tree by recursive method */
-        for (xmlNode *curNode = node; curNode; curNode = curNode->next) {
-            if (curNode->type == XML_TEXT_NODE) {
-              buf += (const char*)curNode->content;
-            }
-            get_text(curNode->children, buf);
+    static int get_text(xml_node *node, str &buf) { /* print all text info from html tree by recursive method */
+        for (xml_node *cur_node = node; cur_node; cur_node = cur_node->next) {
+            if (cur_node->type == XML_TEXT_NODE)
+              buf += (const char*)cur_node->content;
+            get_text(cur_node->children, buf);
         }
         return 0;
     }
@@ -37,7 +52,7 @@ class scanner {
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, scanner::write_callback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, "Maxim/1.0");
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, "User/1.0");
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         CURLcode res = curl_easy_perform(curl);
         if (res != CURLE_OK)
@@ -49,26 +64,24 @@ class scanner {
     str get_content_from_page(const str& url, const str& html_code) {
       str res;
 
-      // Разбираем HTML из памяти
-      html_doc doc = htmlReadMemory(html_code.c_str(), html_code.size(), nullptr, nullptr, HTML_PARSE_NOWARNING | HTML_PARSE_NOERROR);
+      /* HTML from mem */
+      html_doc doc = html_read_mem(html_code.c_str(), html_code.size(), nullptr, nullptr, HTML_PARSE_NOWARNING | HTML_PARSE_NOERROR);
       if (!doc) {
         std::cerr << "Cannot parse HTML" << std::endl;
         return "";
       }
 
-      // Получаем корневой элемент документа
-      xmlNode *root = xmlDocGetRootElement(doc);
+      /* GET ROOT ELEMENT FROM DOCUMENT */
+      xml_node *root = xml_doc_get_root_element(doc);
       if (!root) {
         std::cerr << "Empty doc" << std::endl;
-        xmlFreeDoc(doc);
+        xml_free_doc(doc);
         return "";
       }
 
       scanner::get_text(root, res);
 
-      // Освобождаем ресурсы
-      xmlFreeDoc(doc);
-
+      xml_free_doc(doc);
       return res;
     }
 
@@ -76,17 +89,17 @@ class scanner {
 
     std::vector<str> extract_data(html_doc doc) {
       /* INIT */
-      xmlXPathContextPtr  context = xmlXPathNewContext(doc);
-      std::vector<str>    links;
+      xml_xpath_context_ptr context = xml_xpath_new_context(doc);
+      std::vector<str>      links;
 
       /* GET LINKS */
-      xmlXPathObjectPtr linksObj = xmlXPathEvalExpression((xmlChar *)"//a/@href", context);
-      for(int i = 0; linksObj && i < linksObj->nodesetval->nodeNr;)
-        links.push_back((char *)xmlNodeGetContent(linksObj->nodesetval->nodeTab[i++]));
+      xml_xpath_object_ptr links_obj = xml_xpath_eval_expression((xmlChar *)"//a/@href", context);
+      for(int i = 0; links_obj && i < links_obj->nodesetval->node_nr;)
+        links.push_back((char *)xml_node_get_content(links_obj->nodesetval->node_tab[i++]));
 
       /* FREE */
-      xmlXPathFreeObject(linksObj);
-      xmlXPathFreeContext(context);
+      xml_xpath_free_object(links_obj);
+      xml_xpath_free_context(context);
 
       return links;
     }
